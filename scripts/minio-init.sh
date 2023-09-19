@@ -33,7 +33,7 @@ mc admin user add ${ALIAS} ${RESTIC_USER} ${RESTIC_PASSWORD}
 # add user to restic group
 mc admin group add ${ALIAS} ${RESTIC_GROUP} ${RESTIC_USER}
 
-# Create policies
+# Generate restic backup policy
 cat > ${BACKUP_POLICY_FILE} <<EOF
 {
   "Version": "2012-10-17",
@@ -62,9 +62,50 @@ cat > ${BACKUP_POLICY_FILE} <<EOF
 }
 EOF
 cat ${BACKUP_POLICY_FILE}
+# Creeate policy
 mc admin policy create ${ALIAS} ${BACKUP_POLICY_NAME} ${BACKUP_POLICY_FILE}
-# Attach backup policy
-mc admin policy attach ${ALIAS} mc-backup-policy  --group ${RESTIC_GROUP}
+# Attach backup policy to backup group
+mc admin policy attach ${ALIAS} ${BACKUP_POLICY_NAME}  --group ${RESTIC_GROUP}
+
+# Minecraft Configuration directories policy
+CONFIG_POLICY_NAME=mc-config-policy
+CONFIG_POLICY_FILE=$(mktemp)
+# Create policy for each config sub dirs
+# Header
+cat > ${CONFIG_POLICY_FILE} <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+EOF
+# Individual resources
+for resource in ${MINECRAFT_DIRS}
+do 
+  cat >> ${CONFIG_POLICY_FILE} <<EOF
+        {
+            "Sid": "PutObject${resource}",
+            "Effect": "Allow",
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::${MINECRAFT_BUCKET}/${resource}/*"
+        },
+EOF
+done
+# Footer, Deny added to cope with last statement comma
+cat >> ${CONFIG_POLICY_FILE} <<EOF
+    {
+            "Sid": "DenyPut${BACKUP_DIR}",
+            "Effect": "Deny",
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::${MINECRAFT_BUCKET}/${BACKUP_DIR}/*"
+    }
+  ]
+}
+EOF
+#
+cat ${CONFIG_POLICY_FILE}
+mc admin policy create ${ALIAS} ${CONFIG_POLICY_NAME} ${CONFIG_POLICY_FILE}
+# Attach config policy
+# mc admin policy attach ${ALIAS} ${CONFIG_POLICY_NAME} --group ${CONFIG_GROUP}
+
 
 # Create service account for restic
 mc admin user svcacct add                       \
