@@ -1,20 +1,30 @@
 #!/bin/bash
 
 set +o history  
+# Server
 ALIAS=local
 MINIO_SERVER=minio
 
+# Bucket
 MINECRAFT_BUCKET=minecraft
 
-RESTIC_GROUP=${RESTIC_USER}-group
+# Users and Groups
+RESTIC_GROUP=restic-group
+CONFIG_GROUP=config-group
 
+# Policies
 BACKUP_POLICY_NAME=mc-backup-policy
 BACKUP_POLICY_FILE=$(mktemp)
+#
+CONFIG_POLICY_NAME=mc-config-policy
+CONFIG_POLICY_FILE=$(mktemp)
+
 # Create temp dir holding the structure to apply to the bucket
 TMP_DIR=$(mktemp -d)
 BACKUP_DIR="Backups"
 MINECRAFT_DIRS="Datapacks Icons Mods Plugins Worlds"
 SUB_DIRS="${BACKUP_DIR} ${MINECRAFT_DIRS}"
+
 
 # Wait for Minio server to be up
 echo "Waiting for ${MINIO_SERVER} ..."
@@ -67,9 +77,13 @@ mc admin policy create ${ALIAS} ${BACKUP_POLICY_NAME} ${BACKUP_POLICY_FILE}
 # Attach backup policy to backup group
 mc admin policy attach ${ALIAS} ${BACKUP_POLICY_NAME}  --group ${RESTIC_GROUP}
 
-# Minecraft Configuration directories policy
-CONFIG_POLICY_NAME=mc-config-policy
-CONFIG_POLICY_FILE=$(mktemp)
+#
+# ReConfigstic part
+# Create specific config user
+mc admin user add ${ALIAS} ${CONFIG_USER} ${CONFIG_PASSWORD}
+# add user to restic group
+mc admin group add ${ALIAS} ${CONFIG_GROUP} ${CONFIG_USER}
+
 # Create policy for each config sub dirs
 # Header
 cat > ${CONFIG_POLICY_FILE} <<EOF
@@ -89,13 +103,13 @@ do
         },
 EOF
 done
-# Footer, Deny added to cope with last statement comma
+# Adding List to give GUI user visibility
 cat >> ${CONFIG_POLICY_FILE} <<EOF
     {
-            "Sid": "DenyPut${BACKUP_DIR}",
-            "Effect": "Deny",
-            "Action": "s3:PutObject",
-            "Resource": "arn:aws:s3:::${MINECRAFT_BUCKET}/${BACKUP_DIR}/*"
+            "Sid": "List${BACKUP_DIR}",
+            "Effect": "Allow",
+            "Action": ["s3:ListBucket"],
+            "Resource": "arn:aws:s3:::${MINECRAFT_BUCKET}/*"
     }
   ]
 }
@@ -104,7 +118,7 @@ EOF
 cat ${CONFIG_POLICY_FILE}
 mc admin policy create ${ALIAS} ${CONFIG_POLICY_NAME} ${CONFIG_POLICY_FILE}
 # Attach config policy
-# mc admin policy attach ${ALIAS} ${CONFIG_POLICY_NAME} --group ${CONFIG_GROUP}
+mc admin policy attach ${ALIAS} ${CONFIG_POLICY_NAME} --group config-group
 
 
 # Create service account for restic
